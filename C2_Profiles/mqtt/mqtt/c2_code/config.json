@@ -1,0 +1,16 @@
+{
+  "instances": [
+    {
+      "mqtt_server": "",
+      "mqtt_port": "8883",
+      "mqtt_topic": "billbradley/",
+      "mqtt_mythic": "1",
+      "mqtt_taskcheck": "2",
+      "mqtt_user": "",
+      "mqtt_pass": "",
+      "debug": false,
+      "use_ssl": true,
+      "payloads": {}
+    }
+  ]
+}
