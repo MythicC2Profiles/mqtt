@@ -8,13 +8,3 @@ This repo also contains a modified version of the medusa agent which can communi
 ```
 sudo ./mythic-cli install github <url to your agent> [optional branch name]
 ```
-
-
-## How to install an agent in this format within Mythic
-
-When it's time for you to test out your install or for another user to install your agent, it's pretty simple. Within Mythic is a `mythic-cli` binary you can use to install agents:
-
-* `sudo ./mythic-cli install github https://github.com/user/repo` to install the main branch
-* `sudo ./mythic-cli install github https://github.com/user/repo -b branchname` to install a specific branch of that repo
-
-
