@@ -1,4 +1,4 @@
-# mqtt and medusa-mqtt
+# mqtt C2 Profile and medusa-mqtt Agent
 
 This repo containes a mqtt listener that will connect to an external mqtt server in the C2_Profiles directory.  
 This repo also contains a modified version of the medusa agent which can communicate over mqtt in the Payload_Type directory.
