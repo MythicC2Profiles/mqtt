@@ -10,7 +10,7 @@
                     "task_id": task_id
                 }] 
             }
-            response = self.postMessageAndRetrieveResponse(data)
+            response = self.sendMessageAndRetrieveResponse(data)
             chunk = response["responses"][0]
             chunk_num+=1
             total_chunks = chunk["total_chunks"]

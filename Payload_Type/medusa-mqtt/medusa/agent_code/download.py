@@ -16,7 +16,7 @@
                 }
             }]
         }
-        initial_response = self.postMessageAndRetrieveResponse(data)
+        initial_response = self.sendMessageAndRetrieveResponse(data)
         file_id = initial_response["responses"][0]["file_id"]
         chunk_num = 1
         with open(file_path, 'rb') as f:
@@ -42,7 +42,7 @@
                     ]
                 }
                 chunk_num+=1
-                response = self.postMessageAndRetrieveResponse(data)
+                response = self.sendMessageAndRetrieveResponse(data)
         return json.dumps({
             "agent_file_id": file_id
         })

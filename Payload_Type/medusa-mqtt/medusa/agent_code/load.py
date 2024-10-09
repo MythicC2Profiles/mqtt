@@ -8,7 +8,7 @@
             data = { "action": "post_response", "responses": [
                     { "upload": { "chunk_size": CHUNK_SIZE, "file_id": file_id, "chunk_num": chunk_num+1 }, "task_id": task_id }
                 ]}
-            response = self.postMessageAndRetrieveResponse(data)
+            response = self.sendMessageAndRetrieveResponse(data)
             chunk = response["responses"][0]
             chunk_num+=1
             total_chunks = chunk["total_chunks"]
@@ -20,5 +20,5 @@
             cmd_list = [{"action": "add", "cmd": command}]
             responses = [{ "task_id": task_id, "user_output": "Loaded command: {}".format(command), "commands": cmd_list, "completed": True }]
             message = { "action": "post_response", "responses": responses }
-            response_data = self.postMessageAndRetrieveResponse(message)
+            response_data = self.sendMessageAndRetrieveResponse(message)
         else: return "Failed to upload '{}' command".format(command)
