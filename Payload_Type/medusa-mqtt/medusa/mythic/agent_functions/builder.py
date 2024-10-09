@@ -31,7 +31,7 @@ class Medusa(PayloadType):
             name="python_version",
             parameter_type=BuildParameterType.ChooseOne,
             description="Choose Python version",
-            choices=["Python 3.8", "Python 2.7"],
+            choices=["Python 3.8", "Nope"],
             default_value="Python 3.8"
         ),
         BuildParameter(
