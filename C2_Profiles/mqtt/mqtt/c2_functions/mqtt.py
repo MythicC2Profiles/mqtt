@@ -106,7 +106,7 @@ class mqtts(C2Profile):
 		C2ProfileParameter(
 			name="encrypted_exchange_check",
 			description="Perform Key Exchange",
-			default_value="True",
+			default_value=True,
 			required=True,
 		)
 	]
