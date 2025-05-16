@@ -3,7 +3,7 @@ This is a Mythic C2 Profile called mqtt. It provides a way for agents to connect
 This profile includes:
 
     Kill Dates
-    Sleep Intervals (for the messages within the single websocket connection)
+    Sleep Intervals 
     Support for SSL
 
 The c2 profile has `mythic_container==0.5.12 PyPi` package installed and reports to Mythic as version "3.3".
