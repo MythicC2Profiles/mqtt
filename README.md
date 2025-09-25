@@ -22,6 +22,6 @@ This allows multiple agents to conenct to the same mqtt server, the Mythic mqtt 
 ## How to install an agent in this format within Mythic
 
 Use mythic-cli to install it:
-`sudo ./mythic-cli install github https://github.com/grampae/mqtt.git`
+`sudo ./mythic-cli install github https://github.com/MythicC2Profiles/mqtt.git`
 
 See https://docs.mythic-c2.net/installation#installing-agents-c2-profiles for more information
