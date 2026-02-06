@@ -106,7 +106,13 @@ class mqtts(C2Profile):
 		C2ProfileParameter(
 			name="encrypted_exchange_check",
 			description="Perform Key Exchange",
-			default_value=True,
+			default_value="True",
+			required=True,
+		),
+		C2ProfileParameter(
+			name="websockets",
+			description="Does the MQTT server use Websockets?",
+			default_value="False",
 			required=True,
 		)
 	]
