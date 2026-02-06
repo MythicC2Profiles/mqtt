@@ -63,6 +63,7 @@ if __name__ == "__main__":
 			mqtt_topic_taskcheck = config_data['instances'][0]['mqtt_taskcheck']
 			mqtt_user = config_data['instances'][0]['mqtt_user']
 			mqtt_pass = config_data['instances'][0]['mqtt_pass']
+			mqtt_ws = config_data['instances'][0]['websockets']
 			use_ssl = config_data['instances'][0]['use_ssl']
 			debug = config_data['instances'][0]['debug']
 			if debug:
@@ -71,7 +72,10 @@ if __name__ == "__main__":
 				print("Debugging statements are disabled")
 	except Exception as e:
 		print(str(e))
-	client = mqtt.Client()
+	if mqtt_ws == True:
+		client = mqtt.Client(transport="websockets")
+	else:
+		client = mqtt.Client()
 	
 	try:
 		if use_ssl == True:
