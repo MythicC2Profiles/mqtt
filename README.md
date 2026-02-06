@@ -5,6 +5,7 @@ This profile includes:
     Kill Dates
     Sleep Intervals 
     Support for SSL
+    Support for Websockets
 
 The c2 profile has `mythic_container==0.5.12 PyPi` package installed and reports to Mythic as version "3.3".
 This repo containes a mqtt listener that will connect to an external mqtt server.  
