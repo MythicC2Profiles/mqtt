@@ -1,6 +1,6 @@
 # mqtt
 
-Mythic C2 profile for MQTT-based agent communication. Supports persistent broker sessions, dual-channel QoS, and optional sensor event ingestion for ouroboros telemetry.
+Mythic C2 profile for MQTT-based agent communication over the styx relay infrastructure.
 
 ---
 
@@ -10,125 +10,123 @@ Mythic C2 profile for MQTT-based agent communication. Supports persistent broker
 Internet
   │  port 8883 (TLS)
   ▼
-Relay VPS(es)   ← public-facing, one or more
+Relay VPS(es)       ← public-facing, ephemeral, one or more
   │  WireGuard mesh (private)
   ▼
-MQTT Broker     ← never internet-exposed
-  │  WireGuard
+MQTT Broker         ← never internet-exposed
+  │  WireGuard  port 1883
   ▼
-Mythic server   ← air-gapped from internet
+Mythic server       ← connects to broker, never to relays
 ```
 
-Agents connect to relays over TLS. Relays bridge to the broker over WireGuard. Mythic connects to the broker over WireGuard. A blocked or burned relay does not expose the broker or Mythic.
+Agents connect to relays over TLS on port **8883**. Relays bridge all traffic to the hidden broker over WireGuard. The Mythic listener (`mqttclient.py`) connects to the broker on port **1883** over WireGuard — a separate listener that relay bridges never touch. A burned relay does not expose the broker or Mythic.
 
-Agent failover: up to four relay hostnames baked into the binary (`mqtt_server` + `mqtt_server_1..3`). The agent tries each in order; if one fails it moves to the next.
+Agent failover: up to four relay hostnames baked into the binary at build time (`mqtt_server` + `mqtt_server_1..3`). The agent tries each in order on connection failure.
+
+---
+
+## Port layout
+
+| Port | Used by | Notes |
+|------|---------|-------|
+| **8883** | Relay VPS bridges, agents | TLS; never opened to Mythic |
+| **1883** | `mqttclient.py` (this profile) | TLS over WireGuard; Netbird policy must permit mythic → broker TCP:1883 |
+
+**`config.json` must use port `1883`.** Connecting on `8883` will time out silently if the Netbird policy only permits `1883`.
 
 ---
 
 ## Topic layout
 
 ```
-<base_topic><recv_subtopic>    ← tasking: Mythic → agent
-<base_topic><send_subtopic>    ← responses: agent → Mythic
-<sensor_topic>/<cb_uuid>/<event_type>   ← sensor events (QoS 1 + RETAIN)
+<mqtt_topic><mqtt_taskcheck>    ← agent → Mythic (checkins, responses)
+<mqtt_topic><mqtt_mythic>       ← Mythic → agent (tasking)
 ```
 
 All topic components are operator-configurable — no fixed strings appear in broker logs.
 
-### QoS split
+### QoS
 
 | Channel | QoS | Reason |
 |---------|-----|--------|
-| Agent tasking (recv) | 0 | No replay on reconnect — prevents duplicate task delivery |
-| Agent responses (send) | 1 | At-least-once delivery to Mythic |
-| Sensor events | 1 | Persistent session queues events published while offline |
-
-### Persistent vs clean sessions
-
-| Agent | `clean_session` | Reason |
-|-------|-----------------|--------|
-| ouroboros | `False` | Broker queues missed sensor events while listener is offline |
-| epona (stateless) | `True` | No session state needed; avoids stale message buildup |
+| Agent → Mythic (taskcheck) | 0 | No replay on reconnect — prevents duplicate delivery |
+| Mythic → agent (mythic) | 1 | At-least-once delivery to broker |
 
 ---
 
-## Sensor event ingestion
+## config.json
 
-When `sensor_ingestion=True` and a message arrives on `<sensor_topic>/#`, the listener:
+The listener reads this file on startup. Credentials and broker address go here — this file is **not** committed with live values.
 
-1. Parses `<sensor_topic>/<callback_uuid>/<event_type>` from the topic
-2. Looks up the Mythic callback for `callback_uuid`
-3. Creates a Mythic task result attached to the active `stream` task for that callback
-4. The event appears in the Mythic UI as streaming output
-
-This happens in a background thread so it does not block agent message processing.
+```json
+{
+  "instances": [
+    {
+      "mqtt_server": "broker.wg.ip",
+      "mqtt_port": "1883",
+      "mqtt_topic": "epona/",
+      "mqtt_mythic": "1",
+      "mqtt_taskcheck": "2",
+      "mqtt_user": "mythic",
+      "mqtt_pass": "your-mqtt-password",
+      "use_ssl": true,
+      "skip_tls_verify": true,
+      "websockets": false,
+      "debug": false,
+      "payloads": {}
+    }
+  ]
+}
+```
 
 ---
 
 ## C2 profile parameters
 
+Set in the Mythic UI at payload build time. Baked into the agent binary — separate from `config.json`.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `mqtt_server` | *(required)* | Primary relay hostname or IP |
-| `mqtt_server_1..3` | `` | Failover relays (optional) |
-| `mqtt_port` | `8883` | Relay port |
-| `use_ssl` | `True` | Enable TLS on relay connection |
+| `mqtt_server` | *(required)* | Primary relay hostname or IP — port **8883** |
+| `mqtt_server_1..3` | *(empty)* | Failover relay addresses — agent tries each in order |
+| `mqtt_port` | `8883` | Relay port agents connect to |
+| `use_ssl` | `True` | TLS on relay connection |
 | `skip_tls_verify` | `True` | Accept self-signed relay certificates |
-| `clean_session` | `False` | `False` = persistent sessions (ouroboros); `True` = stateless (epona) |
-| `sensor_ingestion` | `True` | Subscribe to `sensor_topic/#` and forward events to Mythic |
-| `sensor_topic` | `telemetry` | Topic prefix for sensor events — must match `mqtt_sensor_prefix` baked into agent binary |
-| `mqtt_client` | `styx-listener` | Listener client ID — only relevant for broker ACLs |
-| `mqtt_user` | `` | MQTT username |
-| `mqtt_pass` | `` | MQTT password |
-| `mqtt_topic` | `epona/` | Base topic prefix for agent channels |
-| `mqtt_mythic` | `1` | Recv sub-topic (Mythic → agent) |
-| `mqtt_taskcheck` | `2` | Send sub-topic (agent → Mythic) |
-| `callback_interval` | `10` | Agent sleep between exchanges (seconds) |
+| `mqtt_client` | `epona` | Agent MQTT client ID — leave as `epona` to auto-generate a unique ID per build from payload UUID |
+| `mqtt_user` | *(empty)* | MQTT username |
+| `mqtt_pass` | *(empty)* | MQTT password |
+| `mqtt_topic` | `epona/` | Base topic prefix — must match `mqtt_topic` in `config.json` |
+| `mqtt_mythic` | `1` | Mythic → agent sub-topic |
+| `mqtt_taskcheck` | `2` | Agent → Mythic sub-topic |
+| `callback_interval` | `10` | Agent sleep between checkins (seconds) |
 | `callback_jitter` | `14` | Jitter percent |
-| `killdate` | *(1 year)* | Kill date |
-| `AESPSK` | *(Mythic-managed)* | AES-256 encryption key pair |
+| `killdate` | *(1 year)* | Agent auto-exit date |
+| `AESPSK` | `aes256_hmac` | Payload encryption |
 | `encrypted_exchange_check` | `True` | RSA key exchange on checkin |
-| `websockets` | `False` | Use WebSockets transport |
+| `websockets` | `False` | WebSocket transport |
 
 ---
 
-## Opsec: sensor topic
-
-The `sensor_topic` parameter controls what the listener subscribes to. It must match the `mqtt_sensor_prefix` build parameter baked into the ouroboros binary. Set both to an operator-chosen value per operation — the default `telemetry` should be changed. This ensures no fixed topic string appears consistently across broker logs.
-
----
-
-## Broker ACL recommendations
+## Broker ACL
 
 ```
 # mosquitto example
 
-# mqtt listener — full access
-user styx-listener
+# Mythic listener — full access on its topic prefix
+user mythic
 topic readwrite #
 
-# ouroboros agent — write only to sensor topic and its own channel
-user ouroboros-<uuid>
-topic write telemetry/#
-topic readwrite <base_topic>/#
+# Epona agent — scoped to its own topic prefix
+user epona-<op>
+topic readwrite epona/#
 ```
 
 ---
 
-## Relay TLS
+## OPSEC
 
-The relay presents a certificate on port 8883. With `skip_tls_verify=True` (default), agents and the listener accept any certificate — appropriate for self-signed. Set `skip_tls_verify=False` and provision a proper certificate for pinning.
-
----
-
-## Directory layout
-
-```
-mqtt/
-├─ README.md
-└─ C2_Profiles/mqtt/mqtt/
-    ├─ c2_code/
-    │   └─ mqttclient.py   # paho client, sensor ingestion, QoS split
-    └─ c2_functions/
-        └─ mqtt.py         # C2Profile class, all parameter definitions
-```
+- The broker is never internet-exposed. Agents only ever reach relay VPSes.
+- Relay addresses are ChaCha20-obfuscated at compile time in the agent binary — they do not appear as plaintext strings.
+- `mqtt_topic` is operator-configurable per operation — no fixed topic string appears across broker logs.
+- Use a different `mqtt_user`/`mqtt_pass` per operation (`broker/add-op.sh` in the styx repo).
+- `skip_tls_verify=True` is appropriate for self-signed relay certificates. Set to `False` with a CA-signed cert for pinning.
