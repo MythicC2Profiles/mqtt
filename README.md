@@ -1,28 +1,134 @@
-# MQTT C2 Profile
-This is a Mythic C2 Profile called mqtt. It provides a way for agents to connect to a intermediary mqtt server in which the C2 Profile also communicates. 
-This profile includes:
+# mqtt
 
-    Kill Dates
-    Sleep Intervals 
-    Support for SSL
-    Support for Websockets
+Mythic C2 profile for MQTT-based agent communication. Supports persistent broker sessions, dual-channel QoS, and optional sensor event ingestion for ouroboros telemetry.
 
-The c2 profile has `mythic_container==0.5.12 PyPi` package installed and reports to Mythic as version "3.3".
-This repo containes a mqtt listener that will connect to an external mqtt server.  
-This allows multiple agents to conenct to the same mqtt server, the Mythic mqtt C2 profile will poll the mqtt server to send commands and receive responses.
+---
 
-## MQTT C2 Workflow
-![2025-05-15_22-30](https://github.com/user-attachments/assets/ff594c8b-25fe-4f84-8011-c4dabf7f4cfd)
-1. The agent sends a checkin to the pre defined basetopic/checkin topic.
-2. The C2 Profile is subscribed to the checkin and output subtopics so it sees the checkin and forwards to Mythic.
-3. Mythic responds with tasking and the C2 Profile sends a message to the checkin subtopic with the task received from Mythic
-4. As the agent is subscribed to the checkin subtopic, it sees the message and performs the task.
-5. After completion of the task the agent sends a message to the output subtopic with the results of said task.
-6. The C2 Profile takes the task output from the output topic, and displays it in the Mythic UI.
+## Infrastructure topology
 
-## How to install an agent in this format within Mythic
+```
+Internet
+  │  port 8883 (TLS)
+  ▼
+Relay VPS(es)   ← public-facing, one or more
+  │  WireGuard mesh (private)
+  ▼
+MQTT Broker     ← never internet-exposed
+  │  WireGuard
+  ▼
+Mythic server   ← air-gapped from internet
+```
 
-Use mythic-cli to install it:
-`sudo ./mythic-cli install github https://github.com/MythicC2Profiles/mqtt.git`
+Agents connect to relays over TLS. Relays bridge to the broker over WireGuard. Mythic connects to the broker over WireGuard. A blocked or burned relay does not expose the broker or Mythic.
 
-See https://docs.mythic-c2.net/installation#installing-agents-c2-profiles for more information
+Agent failover: up to four relay hostnames baked into the binary (`mqtt_server` + `mqtt_server_1..3`). The agent tries each in order; if one fails it moves to the next.
+
+---
+
+## Topic layout
+
+```
+<base_topic><recv_subtopic>    ← tasking: Mythic → agent
+<base_topic><send_subtopic>    ← responses: agent → Mythic
+<sensor_topic>/<cb_uuid>/<event_type>   ← sensor events (QoS 1 + RETAIN)
+```
+
+All topic components are operator-configurable — no fixed strings appear in broker logs.
+
+### QoS split
+
+| Channel | QoS | Reason |
+|---------|-----|--------|
+| Agent tasking (recv) | 0 | No replay on reconnect — prevents duplicate task delivery |
+| Agent responses (send) | 1 | At-least-once delivery to Mythic |
+| Sensor events | 1 | Persistent session queues events published while offline |
+
+### Persistent vs clean sessions
+
+| Agent | `clean_session` | Reason |
+|-------|-----------------|--------|
+| ouroboros | `False` | Broker queues missed sensor events while listener is offline |
+| epona (stateless) | `True` | No session state needed; avoids stale message buildup |
+
+---
+
+## Sensor event ingestion
+
+When `sensor_ingestion=True` and a message arrives on `<sensor_topic>/#`, the listener:
+
+1. Parses `<sensor_topic>/<callback_uuid>/<event_type>` from the topic
+2. Looks up the Mythic callback for `callback_uuid`
+3. Creates a Mythic task result attached to the active `stream` task for that callback
+4. The event appears in the Mythic UI as streaming output
+
+This happens in a background thread so it does not block agent message processing.
+
+---
+
+## C2 profile parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `mqtt_server` | *(required)* | Primary relay hostname or IP |
+| `mqtt_server_1..3` | `` | Failover relays (optional) |
+| `mqtt_port` | `8883` | Relay port |
+| `use_ssl` | `True` | Enable TLS on relay connection |
+| `skip_tls_verify` | `True` | Accept self-signed relay certificates |
+| `clean_session` | `False` | `False` = persistent sessions (ouroboros); `True` = stateless (epona) |
+| `sensor_ingestion` | `True` | Subscribe to `sensor_topic/#` and forward events to Mythic |
+| `sensor_topic` | `telemetry` | Topic prefix for sensor events — must match `mqtt_sensor_prefix` baked into agent binary |
+| `mqtt_client` | `styx-listener` | Listener client ID — only relevant for broker ACLs |
+| `mqtt_user` | `` | MQTT username |
+| `mqtt_pass` | `` | MQTT password |
+| `mqtt_topic` | `epona/` | Base topic prefix for agent channels |
+| `mqtt_mythic` | `1` | Recv sub-topic (Mythic → agent) |
+| `mqtt_taskcheck` | `2` | Send sub-topic (agent → Mythic) |
+| `callback_interval` | `10` | Agent sleep between exchanges (seconds) |
+| `callback_jitter` | `14` | Jitter percent |
+| `killdate` | *(1 year)* | Kill date |
+| `AESPSK` | *(Mythic-managed)* | AES-256 encryption key pair |
+| `encrypted_exchange_check` | `True` | RSA key exchange on checkin |
+| `websockets` | `False` | Use WebSockets transport |
+
+---
+
+## Opsec: sensor topic
+
+The `sensor_topic` parameter controls what the listener subscribes to. It must match the `mqtt_sensor_prefix` build parameter baked into the ouroboros binary. Set both to an operator-chosen value per operation — the default `telemetry` should be changed. This ensures no fixed topic string appears consistently across broker logs.
+
+---
+
+## Broker ACL recommendations
+
+```
+# mosquitto example
+
+# mqtt listener — full access
+user styx-listener
+topic readwrite #
+
+# ouroboros agent — write only to sensor topic and its own channel
+user ouroboros-<uuid>
+topic write telemetry/#
+topic readwrite <base_topic>/#
+```
+
+---
+
+## Relay TLS
+
+The relay presents a certificate on port 8883. With `skip_tls_verify=True` (default), agents and the listener accept any certificate — appropriate for self-signed. Set `skip_tls_verify=False` and provision a proper certificate for pinning.
+
+---
+
+## Directory layout
+
+```
+mqtt/
+├─ README.md
+└─ C2_Profiles/mqtt/mqtt/
+    ├─ c2_code/
+    │   └─ mqttclient.py   # paho client, sensor ingestion, QoS split
+    └─ c2_functions/
+        └─ mqtt.py         # C2Profile class, all parameter definitions
+```

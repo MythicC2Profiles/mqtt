@@ -2,14 +2,16 @@
   "instances": [
     {
       "mqtt_server": "",
-      "mqtt_port": "8883",
-      "mqtt_topic": "billbradley/",
+      "mqtt_port": "1883",
+      "mqtt_topic": "epona/",
       "mqtt_mythic": "1",
       "mqtt_taskcheck": "2",
       "mqtt_user": "",
       "mqtt_pass": "",
-      "debug": false,
       "use_ssl": true,
+      "skip_tls_verify": true,
+      "websockets": false,
+      "debug": false,
       "payloads": {}
     }
   ]

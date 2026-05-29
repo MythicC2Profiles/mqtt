@@ -5,94 +5,117 @@ weight = 5
 +++
 
 ## Overview
-This C2 profile consists of a MQTT client which sends and receives messages to a MQTT broker, thereby communicating tasks and output between MQTT agents and the C2 profile container, where messages are then forwarded to Mythic's API. The C2 Profile container acts as a proxy between agents and the Mythic server itself.
 
-Agents will communicate on specified server and topics, which this C2 profile is meant to also communicate on.
+This C2 profile connects to a private MQTT broker and relays messages between MQTT-based agents and the Mythic server. It is designed to work with the styx relay infrastructure — agents connect to public relay VPSes over TLS, relays bridge to the hidden broker over WireGuard, and the profile container connects to that same broker over WireGuard.
 
 ### C2 Workflow
+
 {{<mermaid>}}
 sequenceDiagram
     participant M as Mythic
     participant Q as MQTT Container
+    participant B as Broker
+    participant R as Relay VPS
     participant A as Agent
-    A ->>+ Q: receive checkin message on mqtt_taskcheck topic
-    Q ->>+ M: forward request to Mythic
-    M -->>- Q: reply with tasking
-    Q -->>- A: publish tasking message on mqtt_mythic topic
+    A ->>+ R: TLS:8883 — agent checkin on mqtt_taskcheck topic
+    R ->>+ B: WireGuard bridge — forward
+    B ->>+ Q: deliver to styx-listener subscription
+    Q ->>+ M: POST /agent_message
+    M -->>- Q: tasking response
+    Q -->>- B: publish on mqtt_mythic topic (QoS 1)
+    B -->>- R: bridge forward
+    R -->>- A: deliver tasking
 {{< /mermaid >}}
-Legend:
 
-- Solid line is a new connection
-- Dotted line is a message within that connection
+- Agent → broker path: QoS 0 (no replay on reconnect, prevents duplicate task delivery)
+- Mythic → agent path: QoS 1 (at-least-once delivery)
 
-## Configuration Options
-The profile reads a `config.json` file which will be used to set the connection and topic values.
+---
 
-```JSON
+## Port layout — read this first
+
+The styx broker exposes **two separate listeners** on different ports. Using the wrong port is the most common misconfiguration.
+
+| Port | Who connects | Transport | Netbird policy required |
+|------|-------------|-----------|------------------------|
+| **8883** | Relay VPSes (bridge to broker) and agents directly | TLS | relay → broker TCP:8883 |
+| **1883** | Mythic `mqttclient.py` (this profile) | TLS over WireGuard | mythic-ops → broker TCP:1883 |
+
+**`config.json` must use port `1883`.** Port `8883` is for relay bridges, not for the Mythic listener. If the Netbird policy only permits `1883`, connecting on `8883` will silently time out and Epona will never receive tasking.
+
+---
+
+## Configuration
+
+The profile reads `config.json` on startup. Set these values before starting the container.
+
+```json
 {
   "instances": [
     {
-      "mqtt_server": "mqtt.broker.com",
-      "mqtt_port": "8883",
-      "mqtt_topic": "billbradley/",
+      "mqtt_server": "broker.wg.ip",
+      "mqtt_port": "1883",
+      "mqtt_topic": "epona/",
       "mqtt_mythic": "1",
       "mqtt_taskcheck": "2",
-      "mqtt_user": "",
-      "mqtt_pass": "",
-      "debug": false,
+      "mqtt_user": "mythic",
+      "mqtt_pass": "your-mqtt-password",
       "use_ssl": true,
+      "skip_tls_verify": true,
+      "websockets": false,
+      "debug": false,
       "payloads": {}
     }
   ]
 }
-
 ```
 
+| Field | Description |
+|-------|-------------|
+| `mqtt_server` | Broker WireGuard IP or hostname |
+| `mqtt_port` | **Must be `1883`** — the broker's Mythic listener port (not the relay port 8883) |
+| `mqtt_topic` | Base topic prefix — must match what agents were built with |
+| `mqtt_mythic` | Sub-topic for Mythic → agent messages (tasking) |
+| `mqtt_taskcheck` | Sub-topic for agent → Mythic messages (checkin, responses) |
+| `mqtt_user` | MQTT username for broker auth |
+| `mqtt_pass` | MQTT password for broker auth |
+| `use_ssl` | `true` to enable TLS on the broker connection |
+| `skip_tls_verify` | `true` to accept self-signed broker certificates |
+| `websockets` | `true` to use WebSocket transport instead of raw TCP |
+| `debug` | `true` to enable paho-mqtt verbose logging |
 
-- mqtt_server -> The MQTT server that the C2 profile and agent will connect to.
-- mqtt_port -> The port of the MQTT server.
-- mqtt_topic -> The base topic that will house the mqtt_mythic and mqtt_taskcheck subtopics.
-- mqtt_mythic -> The subtopic that Mythic uses to send tasks.
-- mqtt_taskcheck -> The subtopic that an MQTT agent will use to checkin to.
-- mqtt_user -> MQTT username of the mqtt_server (can be blank if using public MQTT server)
-- mqtt_pass -> MQTT password of the mqtt_server (can be blank if using public MQTT server)
-- debug -> Set debug with true or false
-- use_ssl -> Set if mqtt_server uses SSL with true or false
+---
 
+## Profile Parameters
 
-### Profile Options
-#### Base MQTT topic	
-The base topic that will be used on the MQTT server.
-#### Callback Interval	
-A number to indicate how many seconds the agent should wait in between tasking requests.
-#### Callback Jitter	
-Percentage of jitter effect for callback interval.
-#### Crypto type	
-Indicate if you want to use no crypto (i.e. plaintext) or if you want to use Mythic's aes256_hmac. Using no crypto is really helpful for agent development so that it's easier to see messages and get started faster, but for actual operations you should leave the default to aes256_hmac.
-#### Does the mqtt server use SSL?	
-If the MQTT server uses SSL set to True, otherwise False.
-#### External MQTT hostname or IP address to communicate with	
-The hostname of the MQTT server in which communications will be handled.
-#### External MQTT port number	
-The port number in which the MQTT server uses.
-#### Kill Date	
-Date for the agent to automatically exit, typically the after an assessment is finished.
-#### Mqtt Agent tasking and checkin sub-topic	
-A subtopic which will be used to send checkin messages to Mythic
-#### MQTT client ID	
-A client ID which will be used on the MQTT server.
-#### Mqtt Mythic response sub-topic	
-A subtopic which will be used to receive messages from Mythic
-#### MQTT server Password	
-If you need to authenticate to the MQTT server, specify the password here.
-#### MQTT server Username	
-If you need to authenticate to the MQTT server, specify the username here.
-Perform Key Exchange
-#### crypto type
-Indicate if you want to use no crypto (i.e. plaintext) or if you want to use Mythic's aes256_hmac. Using no crypto is really helpful for agent development so that it's easier to see messages and get started faster, but for actual operations you should leave the default to aes256_hmac.
+These are baked into the agent binary at build time. They are separate from `config.json`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `mqtt_server` | *(required)* | Primary relay hostname or IP — **port 8883**, not the broker |
+| `mqtt_server_1..3` | *(empty)* | Failover relay addresses — agent tries each in order |
+| `mqtt_port` | `8883` | Relay port agents connect to |
+| `use_ssl` | `True` | TLS on relay connection |
+| `skip_tls_verify` | `True` | Accept self-signed relay certificates |
+| `mqtt_client` | `epona` | Agent MQTT client ID — leave as `epona` to auto-generate a unique ID per build from payload UUID |
+| `mqtt_user` | *(empty)* | MQTT username |
+| `mqtt_pass` | *(empty)* | MQTT password |
+| `mqtt_topic` | `epona/` | Base topic prefix — must match `mqtt_topic` in `config.json` |
+| `mqtt_mythic` | `1` | Mythic → agent sub-topic |
+| `mqtt_taskcheck` | `2` | Agent → Mythic sub-topic |
+| `callback_interval` | `10` | Agent sleep between checkins (seconds) |
+| `callback_jitter` | `14` | Jitter percent |
+| `killdate` | *(1 year)* | Agent auto-exit date |
+| `AESPSK` | `aes256_hmac` | Payload encryption |
+| `encrypted_exchange_check` | `True` | RSA key exchange on checkin |
+| `websockets` | `False` | WebSocket transport |
+
+---
 
 ## OPSEC
 
-This profile doesn't do any randomization of network components outside of allowing operators to specify internals/jitter. Public MQTT servers are great for developing agents however they should be avoided for production use.  There are a few free and paid cloud alternatives in which you can set up a private MQTT server with defined users and acls.
-
-
+- The broker is never internet-exposed — agents connect to relay VPSes, relays bridge to broker over WireGuard.
+- All relay addresses (`mqtt_server`, `mqtt_server_1..3`) are ChaCha20-obfuscated at compile time in the Epona agent binary — they do not appear as plaintext strings.
+- The `mqtt_topic` base prefix is operator-configurable per operation — no fixed topic string appears in broker logs across engagements.
+- Use a different `mqtt_user`/`mqtt_pass` per operation (`broker/add-op.sh`).
+- `skip_tls_verify=True` is appropriate for self-signed relay certificates. Set to `False` if using a CA-signed certificate with pinning.
